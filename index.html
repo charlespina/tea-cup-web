@@ -15,8 +15,11 @@
             var Field = function(N) {
                 this.N = N;
                 this.values = new Array(N+2);
-                for(int i=0; i<this.values.length(); i++) {
+                for(var i=0; i<this.values.length; i++) {
                     this.values[i] = new Array(N+2);
+                    for (var j=0; j<N+2; j++) {
+                        this.values[i][j] = 0.0;
+                    }
                 }
             };
 
@@ -27,11 +30,11 @@
             };
 
             Field.prototype.addSource = function(source, dt) {
-                for (var i=0; i<this.values.length(); i++)
+                for (var i=0; i<this.values.length; i++)
                 {
-                    for (var j=0; j<this.values.length(); j++)
+                    for (var j=0; j<this.values.length; j++)
                     {
-                        x.values[i][j] += dt*source.values[i][j];
+                        this.values[i][j] += dt*source.values[i][j];
                     }
                 }
             };
@@ -46,10 +49,10 @@
                     this.values[i][N+1] = (b == 2 ? -1: 1) * this.values[i][N];
                 }
 
-                this.values[0][0]     = 0.5f * (this.values[1][0] + this.values[0][1]);
-                this.values[0][N+1]   = 0.5f * (this.values[1][0] + this.values[0][N]);
-                this.values[N+1][0]   = 0.5f * (this.values[1][0] + this.values[N+1][1]);
-                this.values[N+1][N+1] = 0.5f * (this.values[1][0] + this.values[N+1][N]);
+                this.values[0][0]     = 0.5 * (this.values[1][0] + this.values[0][1]);
+                this.values[0][N+1]   = 0.5 * (this.values[1][0] + this.values[0][N]);
+                this.values[N+1][0]   = 0.5 * (this.values[1][0] + this.values[N+1][1]);
+                this.values[N+1][N+1] = 0.5 * (this.values[1][0] + this.values[N+1][N]);
             };
             
             var Solver = function(N, diff, visc) {
@@ -87,6 +90,7 @@
             Solver.prototype.advect = function(d, d0, u, v, b, dt) {
                 var i0, j0, i1, j1;
                 var x, y, s0, t0, s1, t1, dt0;
+                var N = this.N;
 
                 dt0 = dt*N;
 
@@ -96,20 +100,20 @@
                         y = j - dt0*v.values[i][j];
                         if (x<0.5) x=0.5; 
                         if (x>N+0.5) x=N+0.5;
-                        i0 = int(x); 
+                        i0 = Math.floor(x); 
                         i1 = i0+1;
-                        j0 = int(y); 
+                        j0 = Math.floor(y); 
                         j1 = j0+1;
                         s1 = x-i0;
                         s0 = 1-s1;
                         t1 = y-j0;
                         t0 = 1-t1;
-                        d[i][j] = s0*(t0*d0.values[i0][j0] + t1*d0.values[i0][j1]) +
-                                  s1*(t0*d0.values[i1][j0] + t1*d0.values[i1][j1]);
+                        d.values[i][j] = s0*(t0*d0.values[i0][j0] + t1*d0.values[i0][j1]) +
+                                         s1*(t0*d0.values[i1][j0] + t1*d0.values[i1][j1]);
                     }
                 }
 
-                d.set_boundary(b);
+                d.setBoundary(b);
             };
 
             Solver.prototype.project = function(u, v, p, div) {
@@ -131,8 +135,8 @@
                     }
                 }
 
-                u.set_boundary(1);
-                v.set_boundary(2);
+                u.setBoundary(1);
+                v.setBoundary(2);
             };
 
             Solver.prototype.densityStep = function(x, x0, u, v, diff, dt) {
@@ -147,7 +151,7 @@
                 u.addSource(u0, dt);
                 u0.swap(u);
                 this.diffuse(u, u0, 1, visc, dt);
-                swap(v0, v);
+                v0.swap(v);
                 this.diffuse(v, v0, 2, visc, dt);
                 this.project(u, v, u0, v0);
                 u0.swap(u);
@@ -158,7 +162,7 @@
             };
 
             Solver.prototype.step = function(dt) {
-                dt ||= 0.05;
+                dt = dt || 0.05;
                 this.velocityStep(this.u, this.v, this.u_prev, this.v_prev, this.visc, dt);
                 this.densityStep(this.density, this.density_prev, this.u, this.v, this.diff, dt);
             };
