@@ -6,19 +6,55 @@
     <body>
     <div id="container">
     </div>
+    <script id="cup_vert" type="x-shader/x-vertex">
+        //uniform mat3 normalMatrix;
+        //uniform mat4 modelViewMatrix;
+        //uniform mat4 projectionMatrix;
+        //attribute vec3 normal;
+        varying vec3 vN;
+        varying vec3 vP;
+        void main() {
+            vN = normalMatrix * normal;
+            vP = (modelViewMatrix * vec4(position, 1.0)).xyz;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        }
+    </script>
+    <script id="cup_frag" type="x-shader/x-fragment">
+        varying vec3 vN;
+        varying vec3 vP;
+        void main() {
+            vec3 V = normalize(-vP);
+            vec3 L = normalize(vec3(1.0, 1.0, 1.0)); // TODO: make uniform
+            vec3 N = normalize(vN);
+            vec3 H = normalize(V+L);
+            float Ks = 8.0;
+            float Kg = 56.0;
+            // float NdL = dot(N, L);
+            float NdH = dot(N, H);
+            gl_FragColor = vec4(vec3(1.0) * Ks * pow(NdH, Kg), 1.0);
+        }
+    </script>
     <script type="text/javascript" src="js/solver.js"></script>
-    <script type="text/javascript" src="js/gradientmaps.min.js"></script>
     <script type="text/javascript" src="http://cdnjs.cloudflare.com/ajax/libs/three.js/r69/three.js"></script>
     <script type="text/javascript">
+        // TODO: keyboard controls
+        // cup shading
+        // more lights
+        // PBR shading, why not!
+        // spoon
+        // ice cubes
         var solver;
         var container, stats;
-        var camera, scene, renderer, canvas, context;
+        var camera, cameraRTT, scene, sceneRTT, renderer, canvas, context;
+        var renderTexture;
         var N = 128; // resolution of sim
         var mouseX = null, mouseY = null;
-        var material, quad, texture;
+        var dataMaterial, quad, dataTexture;
+        var fluidMaterial;
         var dt = 0.01;
         var imageData = new Float32Array(N*N*3);
-        var colorMap;
+        var vizColorMap;
+        var densityColorMap;
 
         function lerp(a, b, t) {
             return (1-t)*a+t*b;
@@ -80,7 +116,7 @@
            for(var i=0; i<solver.N+2; i++) {
                 for(var j=0; j<solver.N+2; j++) {
                     var t = 1.0 - j/solver.N;
-                    solver.density.values[i][j] = t;
+                    solver.density.values[i][j] = densityColorMap.sample(t)[0];
                 }
            }
         }
@@ -89,14 +125,20 @@
             solver = new Solver(N, 0.0, 0.0005);
 
             container = document.getElementById("container");
-            camera = new THREE.PerspectiveCamera(30, 1.0, 1, 10); //window.innerWidth / window.innerHeight, 1, 10);
+            camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 1, 10);
             camera.position.z = 2;
 
             scene = new THREE.Scene();
 
-            var light = new THREE.DirectionalLight(0xffffff);
+            cameraRTT = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 1, 10);
+            cameraRTT.position.z = 2;
+            sceneRTT = new THREE.Scene();
+
+            renderTexture = new THREE.WebGLRenderTarget(512, 512, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter, format: THREE.RGBFormat });
+
+            /*var light = new THREE.DirectionalLight(0xffffff);
             light.position.set(0, 0, 1).normalize();
-            scene.add(light);
+            scene.add(light);*/
 
             /*canvas = document.createElement("canvas");
             canvas.width = N;
@@ -104,25 +146,48 @@
 
             context = canvas.getContext("2d");*/
 
-            texture = new THREE.DataTexture(imageData, N, N, THREE.RGBFormat, THREE.FloatType);
-            texture.needsUpdate = true;
+            dataTexture = new THREE.DataTexture(imageData, N, N, THREE.RGBFormat, THREE.FloatType);
+            dataTexture.needsUpdate = true;
 
             // TODO: Render to texture: THREE.WebGLRenderTarget
-            material = new THREE.MeshBasicMaterial({ map: texture });
+            dataMaterial = new THREE.MeshBasicMaterial({ map: dataTexture });
+            fluidMaterial = new THREE.MeshBasicMaterial({ map: renderTexture });
             /*
             new THREE.MeshPhongMaterial({color:0x555555, specular: 0xffaa00, shininess: 5})
             */
             /*
             new THREE.ShaderMaterial({
-                vertexShader: document.getElementById("fragment_shader").textContent,
-                fragmentShader: document.getElementById("vertex_shader").textContent,
+                fragmentShader: document.getElementById("fragment_shader").textContent,
+                vertexShader: document.getElementById("vertex_shader").textContent,
                 depthWrite: false
             }); */
 
             var plane = new THREE.PlaneBufferGeometry(1, 1, 1, 1); // TODO: make this resize on screen resize
 
-            quad = new THREE.Mesh(plane, material);
-            scene.add(quad);
+            quad = new THREE.Mesh(plane, dataMaterial);
+            sceneRTT.add(quad);
+
+
+            // Display on plane
+            // var planeDisplay = new THREE.PlaneBufferGeometry(1, 1, 1, 1);
+            // var quadDisplay = new THREE.Mesh(planeDisplay, fluidMaterial);
+            // scene.add(quadDisplay);
+
+            var teaGeo = new THREE.CylinderGeometry(0.3, 0.2, 0.8, 32, 2, true);
+            var teaMesh = new THREE.Mesh(teaGeo, fluidMaterial);
+            teaMesh.rotation.y = 180;
+            scene.add(teaMesh);
+
+            var cupMaterial = new THREE.ShaderMaterial({
+                vertexShader: document.getElementById("cup_vert").textContent,
+                fragmentShader: document.getElementById("cup_frag").textContent,
+                blending: THREE.AdditiveBlending,
+                transparent: true
+            });
+            var cupGeo = new THREE.CylinderGeometry(0.32, 0.22, 0.82, 32, 2, true);
+            var cupMesh = new THREE.Mesh(cupGeo, cupMaterial);
+            scene.add(cupMesh);
+
 
             renderer = new THREE.WebGLRenderer();
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -130,12 +195,15 @@
             container.appendChild(renderer.domElement);
             document.addEventListener('mousemove', onMouseMove, false);
 
-            colorMap = new ColorMap();
-            colorMap.addColorStop(0.0, 0, 0, 0);
-            colorMap.addColorStop(0.8, 69.0/255.0, 36.0/255.0, 7.0/255.0);
-            colorMap.addColorStop(0.95, 1.0, 1.0, 1.0);
+            vizColorMap = new ColorMap();
+            vizColorMap.addColorStop(0.0, 0, 0, 0);
+            vizColorMap.addColorStop(0.3, 69.0/255.0, 36.0/255.0, 7.0/255.0);
+            vizColorMap.addColorStop(1.0, 1.0, 1.0, 1.0);
 
-            console.log(colorMap.sample(1.0));
+            densityColorMap = new ColorMap();
+            densityColorMap.addColorStop(0.0, 0, 0, 0);
+            densityColorMap.addColorStop(0.8, 0.5, 0.5, 0.5);
+            densityColorMap.addColorStop(0.803, 1.0, 1.0, 1.0);
         }
 
         function onMouseMove(event) {
@@ -169,7 +237,7 @@
 
             solver.step(dt);
 
-            updateTexture(solver, texture, colorMap);
+            updateTexture(solver, dataTexture, vizColorMap);
             render();
             // stats.update();
         }
@@ -187,19 +255,13 @@
             }
 
             texture.needsUpdate = true;
-
-            //context.fillStyle = "#FF0000";
-            //context.fillRect(0,0, canvas.width, canvas.height);
-            // context.putImageData(imageData, 0, 0);
-            // texture.image = {data:imageData, width:N, height: N};
-            // texture.needsUpdate = true;
         }
 
         function render() {
             var time = Date.now();
             renderer.clear();
             // render to texture:
-            // renderer.render(sceneRTT, cameraRTT, rtTexture, true);
+            renderer.render(sceneRTT, cameraRTT, renderTexture, true);
             renderer.render(scene, camera);
         }
     </script>
