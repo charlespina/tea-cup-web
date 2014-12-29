@@ -5,13 +5,14 @@
         <style type="text/css">
             body {
                 background-color: black;
+                margin: 0;
             }
         </style>
     </head>
     <body>
     <div id="container">
     </div>
-    <script id="fluid_vert" type="x-shader/x-vertex">
+    <script id="shared_vert" type="x-shader/x-vertex">
         //uniform mat3 normalMatrix;
         //uniform mat4 modelViewMatrix;
         //uniform mat4 projectionMatrix;
@@ -27,6 +28,17 @@
             gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
         }
     </script>
+
+    <script id="glow_frag" type="x-shader/x-fragment">
+        varying vec3 vP;
+
+        void main() {
+            float dist = 6.0*clamp(0.5 - distance(vP.xy*vec2(1.0, 0.6), vec2(0.0, 0.0)), 0.0, 1.0);
+            vec3 color = vec3(69.0/255.0, 36.0/255.0, 7.0/255.0) + vec3(0.1);
+            gl_FragColor = vec4(dist*color, dist);
+        }
+    </script>
+
     <script id="fluid_frag" type="x-shader/x-fragment">
         varying vec3 vN;
         varying vec3 vP;
@@ -71,20 +83,6 @@
         }
     </script>
 
-    <script id="cup_vert" type="x-shader/x-vertex">
-        //uniform mat3 normalMatrix;
-        //uniform mat4 modelViewMatrix;
-        //uniform mat4 projectionMatrix;
-        //attribute vec3 normal;
-        varying vec3 vN;
-        varying vec3 vP;
-
-        void main() {
-            vN = normalMatrix * normal;
-            vP = (modelViewMatrix * vec4(position, 1.0)).xyz;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-        }
-    </script>
     <script id="cup_frag" type="x-shader/x-fragment">
         varying vec3 vN;
         varying vec3 vP;
@@ -126,13 +124,12 @@
         // spoon
         // ice cubes
         var solver;
-        var container, stats;
-        var camera, cameraRTT, scene, sceneRTT, renderer, canvas, context;
+        var container;
+        var camera, cameraRTT, scene, sceneRTT, renderer, context;
         var renderTexture;
         var N = 128; // resolution of sim
         var mouseX = null, mouseY = null;
         var dataMaterial, quad, dataTexture;
-        var fluidMaterial;
         var dt = 0.01;
         var imageData = new Float32Array(N*N*3);
         var vizColorMap;
@@ -188,26 +185,32 @@
             return [lerp(A.r, B.r, t1), lerp(A.g, B.g, t1), lerp(A.b, B.b, t1)];
         };
 
-        init(); 
-        initData(solver);
-        animate();
+        (function main() {
+            init(); 
+            initData(solver);
+            animate();
+        })();
 
         function handleKeyboardInput(e) {
             switch(e.keyCode) {
                 case 114:
                     initData(solver);
                     break;
+                default:
+                    break;
             }
         }
 
         function initData(solver) {
-           var size = (solver.N+2)^2;
-           for(var i=0; i<solver.N+2; i++) {
+            solver.reset();
+
+            var size = (solver.N+2)^2;
+            for(var i=0; i<solver.N+2; i++) {
                 for(var j=0; j<solver.N+2; j++) {
                     var t = 1.0 - j/solver.N;
                     solver.density.values[i][j] = densityColorMap.sample(t)[0];
                 }
-           }
+            }
         }
 
         function init() {
@@ -228,82 +231,123 @@
             dataTexture = new THREE.DataTexture(imageData, N, N, THREE.RGBFormat, THREE.FloatType);
             dataTexture.needsUpdate = true;
 
-            // TODO: Render to texture: THREE.WebGLRenderTarget
             dataMaterial = new THREE.MeshBasicMaterial({ map: dataTexture });
-            fluidMaterial = new THREE.ShaderMaterial({ 
-                vertexShader: document.getElementById("fluid_vert").textContent,
-                fragmentShader: document.getElementById("fluid_frag").textContent,
-                uniforms: { 
-                    "texture": {
-                        type: "t",
-                        value: renderTexture 
-                    },
-                    "reflection": {
-                        type: "t",
-                        value: THREE.ImageUtils.loadTexture("img/rainbow-nebula-sphere-blur.jpg")
-                    }
-                }
-            });
 
             var plane = new THREE.PlaneBufferGeometry(1, 1, 1, 1); // TODO: make this resize on screen resize
 
             quad = new THREE.Mesh(plane, dataMaterial);
             sceneRTT.add(quad);
 
-            // Display on plane
-            // var planeDisplay = new THREE.PlaneBufferGeometry(1, 1, 1, 1);
-            // var quadDisplay = new THREE.Mesh(planeDisplay, fluidMaterial);
-            // scene.add(quadDisplay);
+            // Background
+            {
+                var bgTex = THREE.ImageUtils.loadTexture("img/rainbow-nebula-big.jpg");
+                var aspect = 1.6/2.5;
+                var scale = 2.5;
+                var bgMaterial = new THREE.MeshBasicMaterial({ map: bgTex, depthWrite: false }); 
+                var bgGeo = new THREE.PlaneBufferGeometry(scale, scale*aspect, 1, 1);
+                var bgMesh = new THREE.Mesh(bgGeo, bgMaterial);
+                scene.add(bgMesh);
+            }
 
-            bgMaterial = new THREE.MeshBasicMaterial({ map: THREE.ImageUtils.loadTexture("img/rainbow-nebula-big.jpg") });
-            var bgGeo = new THREE.PlaneBufferGeometry(2.5, 1.6, 1, 1);
-            var bgMesh = new THREE.Mesh(bgGeo, bgMaterial);
-            scene.add(bgMesh);
+            // Glow
+            {
+                var size = 2.0;
+                var glowMat = new THREE.ShaderMaterial({ 
+                    vertexShader: document.getElementById("shared_vert").textContent,
+                    fragmentShader: document.getElementById("glow_frag").textContent,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                    transparent: true
+                }); 
+                var glowGeo = new THREE.PlaneBufferGeometry(size, size, 1, 1);
+                var glowMesh = new THREE.Mesh(glowGeo, glowMat);
+                scene.add(glowMesh);
+            }
 
-            var teaGeo = new THREE.CylinderGeometry(0.3, 0.2, 0.8, 32, 2, true);
-            var teaMesh = new THREE.Mesh(teaGeo, fluidMaterial);
-            teaMesh.rotation.y = 180;
-            scene.add(teaMesh);
-
-            var cupMaterial = new THREE.ShaderMaterial({
-                vertexShader: document.getElementById("cup_vert").textContent,
-                fragmentShader: document.getElementById("cup_frag").textContent,
-                blending: THREE.AdditiveBlending,
-                transparent: true,
-                uniforms: {
-                    "texture": {
-                        type: "t",
-                        value: THREE.ImageUtils.loadTexture("img/rainbow-nebula-sphere.jpg")
+            // Tea
+            {
+                var teaMat = new THREE.ShaderMaterial({ 
+                    vertexShader: document.getElementById("shared_vert").textContent,
+                    fragmentShader: document.getElementById("fluid_frag").textContent,
+                    uniforms: { 
+                        "texture": {
+                            type: "t",
+                            value: renderTexture 
+                        },
+                        "reflection": {
+                            type: "t",
+                            value: THREE.ImageUtils.loadTexture("img/rainbow-nebula-sphere-blur.jpg")
+                        }
                     }
-                }
-            });
-            var cupGeo = new THREE.CylinderGeometry(0.32, 0.22, 0.82, 32, 2, true);
-            var cupMesh = new THREE.Mesh(cupGeo, cupMaterial);
-            scene.add(cupMesh);
+                });
 
+                var teaGeo = new THREE.CylinderGeometry(0.3, 0.2, 0.8, 32, 2, true);
+                var teaMesh = new THREE.Mesh(teaGeo, teaMat);
+                teaMesh.rotation.y = 180;
+                scene.add(teaMesh);
+            }
 
+            // Cup
+            {
+                var cupMaterial = new THREE.ShaderMaterial({
+                    vertexShader: document.getElementById("shared_vert").textContent,
+                    fragmentShader: document.getElementById("cup_frag").textContent,
+                    blending: THREE.AdditiveBlending,
+                    transparent: true,
+                    depthWrite: false,
+                    uniforms: {
+                        "texture": {
+                            type: "t",
+                            value: THREE.ImageUtils.loadTexture("img/rainbow-nebula-sphere.jpg")
+                        }
+                    }
+                });
+                var cupGeo = new THREE.CylinderGeometry(0.32, 0.22, 0.82, 32, 2, true);
+                var cupMesh = new THREE.Mesh(cupGeo, cupMaterial);
+                scene.add(cupMesh);
+            }
+
+            // Scene renderer
             renderer = new THREE.WebGLRenderer();
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.autoClear = false;
             container.appendChild(renderer.domElement);
-            document.addEventListener('mousemove', onMouseMove, false);
 
-            document.addEventListener('keypress', handleKeyboardInput);
-
+            // Create color map for the tea/milk gradient
             vizColorMap = new ColorMap();
             vizColorMap.addColorStop(0.0, 0, 0, 0);
             vizColorMap.addColorStop(0.3, 69.0/255.0, 36.0/255.0, 7.0/255.0);
             vizColorMap.addColorStop(1.0, 1.0, 1.0, 1.0);
 
+            // Create color map defining initial data breakdown
             densityColorMap = new ColorMap();
             densityColorMap.addColorStop(0.0, 0, 0, 0);
             densityColorMap.addColorStop(0.8, 0.5, 0.5, 0.5);
             densityColorMap.addColorStop(0.803, 1.0, 1.0, 1.0);
+
+            // Events
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('keypress', handleKeyboardInput);
+        }
+
+        Number.prototype.clamp = function(low, high) {
+            return Math.min(Math.max(low, this), high);
+        }
+
+        Number.prototype.lerp = function(low, high) {
+            return (1.0-this)*low + this * high;
         }
 
         function onMouseMove(event) {
-            var newMouseX = event.clientX/window.innerWidth;
-            var newMouseY = event.clientY/window.innerHeight;
+            var bbox = container.getBoundingClientRect();
+            var newMouseX = (event.clientX - bbox.left)/(bbox.right - bbox.left);
+            var newMouseY = (event.clientY - bbox.top)/(bbox.bottom - bbox.top);
+
+            // remap to fit cup area
+            var startX = 0.33;
+            var endX = 0.66;
+            newMouseX = ((newMouseX.clamp(startX, endX) - startX)/(endX-startX)).lerp(0.22, 0.52);
+
 
             mouseX = mouseX || newMouseX;
             mouseY = mouseY || newMouseY;
@@ -327,6 +371,7 @@
 
             var now = Date.now();
             var dt = (now - lastTime)/1000.0;
+
             lastTime = now;
             elapsedTime += dt;
 
@@ -334,7 +379,6 @@
 
             updateTexture(solver, dataTexture, vizColorMap);
             render();
-            // stats.update();
         }
 
         function updateTexture(solver, texture, colorMap) {
@@ -356,7 +400,7 @@
             var time = Date.now();
             renderer.clear();
 
-            // render to texture:
+            // render fluid simulation to texture:
             renderer.render(sceneRTT, cameraRTT, renderTexture, true);
 
             // render scene:

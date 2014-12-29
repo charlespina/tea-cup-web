@@ -60,7 +60,16 @@ var Solver = function(N, diff, visc) {
     this.v_prev = new Field(this.N);
     this.density = new Field(this.N);
     this.density_prev = new Field(this.N);
-}
+};
+
+Solver.prototype.reset = function() {
+    this.u.clear();
+    this.u_prev.clear();
+    this.v.clear();
+    this.v_prev.clear();
+    this.density.clear();
+    this.density_prev.clear();
+};
 
 Solver.prototype.inject = function(x, y, density, force, dx, dy) {
     this.u_prev.values[x][y] = force * dx;
